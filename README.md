@@ -1,4 +1,10 @@
-[![img](https://img.shields.io/github/stars/nilaoda/BBDown?label=%E7%82%B9%E8%B5%9E)](https://github.com/nilaoda/BBDown)  [![img](https://img.shields.io/github/last-commit/nilaoda/BBDown?label=%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4)](https://github.com/nilaoda/BBDown)  [![img](https://img.shields.io/github/release/nilaoda/BBDown?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/nilaoda/BBDown/releases)  [![img](https://img.shields.io/github/license/nilaoda/BBDown?label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](https://github.com/nilaoda/BBDown)  [![Build Latest](https://github.com/nilaoda/BBDown/actions/workflows/build_latest.yml/badge.svg)](https://github.com/nilaoda/BBDown/actions/workflows/build_latest.yml)
+[![img](https://img.shields.io/github/stars/xialiag/BBDown?label=%E7%82%B9%E8%B5%9E)](https://github.com/xialiag/BBDown)  [![img](https://img.shields.io/github/last-commit/xialiag/BBDown?label=%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4)](https://github.com/xialiag/BBDown)  [![img](https://img.shields.io/github/release/xialiag/BBDown?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/xialiag/BBDown/releases)  [![img](https://img.shields.io/github/license/xialiag/BBDown?label=%E8%AE%B8%E5%8F%AF%E8%AF%81)](https://github.com/xialiag/BBDown)
+
+> **Fork 说明**:本仓库 fork 自 [nilaoda/BBDown](https://github.com/nilaoda/BBDown)(原版已归档, 2026-05)。在保持原版全部功能的基础上, 修复以下问题(版本号从 1.6.4 起独立演进):
+>
+> - **字幕下载串台修复**:UGC 视频字幕改用 dmview 接口按 cid 精确匹配;intl 模式按 ep_id 精确匹配分集(不再按 index 下标, 避免下到预告/花絮或其他分集的字幕)
+> - **字幕时间范围校验**:下载后校验字幕最大时间不超过视频时长(+10s 容差), 拒绝 AI 字幕槽位串台返回的无关字幕
+> - **Hi-Res FLAC 音频混流修复**:FLAC 无法封装进 MP4 容器, 混流时自动转码 AAC 320k, 不再"合并失败";纯音频模式仍保持 FLAC 无损
 
 > 本项目仅供个人学习、研究和非商业性用途。用户在使用本工具时，需自行确保遵守相关法律法规，特别是与版权相关的法律条款。开发者不对因使用本工具而产生的任何版权纠纷或法律责任承担责任。请用户在使用时谨慎，确保其行为合法合规，并仅在有合法授权的情况下使用相关内容。
 
@@ -25,9 +31,9 @@ dotnet tool update --global BBDown
 ```
 
 # 下载
-Release版本：https://github.com/nilaoda/BBDown/releases
+Release版本：https://github.com/xialiag/BBDown/releases
 
-自动构建的测试版本：https://github.com/nilaoda/BBDown/actions
+自动构建的测试版本：https://github.com/xialiag/BBDown/actions
 
 # 开始使用
 目前命令行参数支持情况

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -17,6 +17,19 @@ static partial class BBDownMuxer
 {
     public static string FFMPEG = "ffmpeg";
     public static string MP4BOX = "mp4box";
+
+    /// <summary>检测文件是否为裸 FLAC 流(B站 Hi-Res 音频为 fLaC 开头)</summary>
+    private static bool IsFlacFile(string path)
+    {
+        try
+        {
+            using var fs = File.OpenRead(path);
+            byte[] buf = new byte[4];
+            if (fs.Read(buf, 0, 4) < 4) return false;
+            return buf[0] == (byte)'f' && buf[1] == (byte)'L' && buf[2] == (byte)'a' && buf[3] == (byte)'C';
+        }
+        catch { return false; }
+    }
 
     private static int RunExe(string app, string parms, bool customBin = false)
     {
@@ -189,7 +202,11 @@ static partial class BBDownMuxer
             if (episodeId != "") argsBuilder.Append($"-metadata album=\"{title}\" ");
             if (pubTime != 0) argsBuilder.Append($"-metadata creation_time=\"{(DateTimeOffset.FromUnixTimeSeconds(pubTime).ToString("yyyy-MM-ddTHH:mm:ss.ffffffZ"))}\" ");
         }
-        argsBuilder.Append("-c:v copy -c:a copy ");
+        // FLAC 音频无法封装进 MP4 容器(ffmpeg 的 mp4 muxer 无 flac tag),混流时转码为 AAC,避免"合并失败"
+        if (!audioOnly && !string.IsNullOrEmpty(audioPath) && IsFlacFile(audioPath))
+            argsBuilder.Append("-c:v copy -c:a aac -b:a 320k ");
+        else
+            argsBuilder.Append("-c:v copy -c:a copy ");
         if (audioOnly && audioPath == "") argsBuilder.Append("-vn ");
         if (subs != null) argsBuilder.Append("-c:s mov_text ");
         // fix macOS hev1, see https://discussions.apple.com/thread/253081863?sortBy=rank

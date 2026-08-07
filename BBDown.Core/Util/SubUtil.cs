@@ -1,7 +1,8 @@
-﻿using BBDown.Core.Protobuf;
+using BBDown.Core.Protobuf;
 using Google.Protobuf;
 using System.Text;
 using static BBDown.Core.Entity.Entity;
+using static BBDown.Core.Logger;
 using static BBDown.Core.Util.HTTPUtil;
 using System.Text.RegularExpressions;
 using System.Text.Json;
@@ -260,25 +261,36 @@ public static partial class SubUtil
                          $"/intl/gateway/v2/ogv/view/app/season?ep_id={epId}&platform=android&s_locale=zh_SG" + (Config.TOKEN != "" ? $"&access_key={Config.TOKEN}" : "");
             string json = await GetWebSourceAsync(api);
             using var infoJson = JsonDocument.Parse(json);
-            var subs = infoJson.RootElement.GetProperty("result").GetProperty("modules")[0].GetProperty("data")
-                .GetProperty("episodes")[index - 1].GetProperty("subtitles").EnumerateArray();
-            foreach (var sub in subs)
+            var episodes = infoJson.RootElement.GetProperty("result").GetProperty("modules")[0].GetProperty("data")
+                .GetProperty("episodes").EnumerateArray();
+            // 按 ep_id 精确匹配对应分集, 不能按 index 取:
+            // 番剧的 episodes 数组包含预告/PV/花絮等, index 与分P序号可能错位, 会下到别的分集的字幕
+            bool found = false;
+            foreach (var ep in episodes)
             {
-                var lan = sub.GetProperty("key").ToString();
-                var url = sub.GetProperty("url").ToString().Replace("\\\\/", "/");
-                Subtitle subtitle = new()
+                if (ep.GetProperty("id").ToString() != epId) continue;
+                found = true;
+                var subs = ep.GetProperty("subtitles").EnumerateArray();
+                foreach (var sub in subs)
                 {
-                    url = url,
-                    lan = lan,
-                    path = $"{aid}/{aid}.{cid}.{lan}{(url.Contains(".json") ? ".srt" : ".ass")}"
-                };
+                    var lan = sub.GetProperty("key").ToString();
+                    var url = sub.GetProperty("url").ToString().Replace("\\\\/", "/");
+                    Subtitle subtitle = new()
+                    {
+                        url = url,
+                        lan = lan,
+                        path = $"{aid}/{aid}.{cid}.{lan}{(url.Contains(".json") ? ".srt" : ".ass")}"
+                    };
 
-                //有空的URL 不合法
-                if (subtitles.Any(s => string.IsNullOrEmpty(s.url)))
-                    throw new Exception("Bad url");
+                    //有空的URL 不合法
+                    if (subtitles.Any(s => string.IsNullOrEmpty(s.url)))
+                        throw new Exception("Bad url");
 
-                subtitles.Add(subtitle);
+                    subtitles.Add(subtitle);
+                }
+                break;
             }
+            if (!found) throw new Exception("Episode not found");
             return subtitles;
         }
         catch (Exception)
@@ -414,8 +426,17 @@ public static partial class SubUtil
         }
         else
         {
-            if (Config.COOKIE == "")
+            if (string.IsNullOrEmpty(epId))
             {
+                // UGC视频: dmview 按 oid(cid) 精确返回字幕, 不会串P/串视频, 未登录也能用
+                // 优先用 dmview; 失败再退回网页接口 (x/player/v2 无 wbi 签名基本必然 -403, 实际会落到 view)
+                subtitles = await GetSubtitlesFromApi3Async(aid, cid, epId, index)
+                            ?? await GetSubtitlesFromApi2Async(aid, cid, epId, index)
+                            ?? await GetSubtitlesFromApi1Async(aid, cid, epId, index);
+            }
+            else if (Config.COOKIE == "")
+            {
+                // 番剧/课程
                 subtitles = await GetSubtitlesFromApi3Async(aid, cid, epId, index); // 未登录只有APP可以拿到字幕了
             }
             else
@@ -441,12 +462,41 @@ public static partial class SubUtil
         return subtitles;
     }
 
-    public static async Task SaveSubtitleAsync(string url, string path)
+    public static async Task<bool> SaveSubtitleAsync(string url, string path, int duration)
     {
+        string text = await GetWebSourceAsync(url);
         if (path.EndsWith(".srt"))
-            await File.WriteAllTextAsync(path, ConvertSubFromJson(await GetWebSourceAsync(url)), Encoding.UTF8);
+        {
+            try
+            {
+                // 校验字幕时间范围: 明显超出视频时长(+10s容差)说明该字幕不是这个视频的
+                // (B站AI字幕槽位有概率串台, 会返回其他视频的ASR内容), 跳过不保存
+                double maxTo = 0;
+                var doc = JsonDocument.Parse(text);
+                foreach (var line in doc.RootElement.GetProperty("body").EnumerateArray())
+                {
+                    double to = line.GetProperty("to").GetDouble();
+                    if (to > maxTo) maxTo = to;
+                }
+                if (duration > 0 && maxTo > duration + 10)
+                {
+                    LogWarn($"字幕时间范围({maxTo:F1}s)超出视频时长({duration}s), 疑似与视频无关的字幕, 已跳过: {path}");
+                    return false;
+                }
+                await File.WriteAllTextAsync(path, ConvertSubFromJson(text), Encoding.UTF8);
+                return true;
+            }
+            catch (Exception e)
+            {
+                LogWarn($"字幕内容解析失败, 已跳过: {path} ({e.Message})");
+                return false;
+            }
+        }
         else
-            await File.WriteAllTextAsync(path, await GetWebSourceAsync(url), Encoding.UTF8);
+        {
+            await File.WriteAllTextAsync(path, text, Encoding.UTF8);
+            return true;
+        }
     }
 
     private static string ConvertSubFromJson(string jsonString)

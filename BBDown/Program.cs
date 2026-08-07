@@ -434,7 +434,7 @@ partial class Program
                     {
                         Log($"下载字幕 {s.lan} => {SubUtil.GetSubtitleCode(s.lan).Item2}...");
                         LogDebug("下载：{0}", s.url);
-                        await SubUtil.SaveSubtitleAsync(s.url, s.path);
+                        await SubUtil.SaveSubtitleAsync(s.url, s.path, p.dur);
                         if (myOption.SubOnly && File.Exists(s.path) && File.ReadAllText(s.path) != "")
                         {
                             var _outSubPath = FormatSavePath(savePathFormat, title, null, null, p, pagesCount, apiType, pubTime);
