@@ -1,6 +1,9 @@
 ﻿using QRCoder;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Net;
 using System.Threading.Tasks;
 using static BBDown.BBDownUtil;
 using static BBDown.Core.Logger;
@@ -64,15 +67,96 @@ internal static class BBDownLoginUtil
                 else
                 {
                     string cc = JsonDocument.Parse(w).RootElement.GetProperty("data").GetProperty("url").ToString();
-                    Log("登录成功: SESSDATA=" + GetQueryString("SESSDATA", cc));
+                    string cookie = await ExtractLoginCookiesAsync(cc);
+                    if (string.IsNullOrEmpty(GetCookieValue(cookie, "SESSDATA")))
+                    {
+                        LogColor("登录失败: 未能换取到SESSDATA, 请重新执行登录指令.");
+                        File.Delete("qrcode.png");
+                        break;
+                    }
+                    Log("登录成功: SESSDATA=" + GetCookieValue(cookie, "SESSDATA"));
                     //导出cookie, 转义英文逗号 否则部分场景会出问题
-                    await File.WriteAllTextAsync(Path.Combine(Program.APP_DIR, "BBDown.data"), cc[(cc.IndexOf('?') + 1)..].Replace("&", ";").Replace(",", "%2C"));
+                    await File.WriteAllTextAsync(Path.Combine(Program.APP_DIR, "BBDown.data"), cookie.Replace(",", "%2C"));
                     File.Delete("qrcode.png");
                     break;
                 }
             }
         }
         catch (Exception e) { LogError(e.Message); }
+    }
+
+    /// <summary>
+    /// 从扫码登录成功返回的 data.url 中提取 Cookie。
+    /// 旧格式: SESSDATA 等凭证直接放在 query 参数里, 直接取用。
+    /// 新版(2025+): query 只带 ticket, 需携带浏览器 UA 请求该 crossDomain 链接,
+    /// 由 302 的 Set-Cookie 响应头下发真正的登录凭证。
+    /// </summary>
+    private static async Task<string> ExtractLoginCookiesAsync(string loginUrl)
+    {
+        string[] wanted = ["SESSDATA", "DedeUserID", "DedeUserID__ckMd5", "bili_jct", "sid"];
+        var cookies = new Dictionary<string, string>();
+        if (loginUrl.Contains('?'))
+        {
+            foreach (var item in loginUrl[(loginUrl.IndexOf('?') + 1)..].Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int eq = item.IndexOf('=');
+                if (eq <= 0) continue;
+                cookies[item[..eq]] = item[(eq + 1)..];
+            }
+        }
+
+        if (cookies.ContainsKey("ticket") && !(cookies.TryGetValue("SESSDATA", out var sessData) && !string.IsNullOrEmpty(sessData)))
+        {
+            Log("检测到ticket登录, 请求crossDomain换取Cookie...");
+            using var handler = new HttpClientHandler
+            {
+                AllowAutoRedirect = false,
+                UseCookies = false,
+                AutomaticDecompression = DecompressionMethods.All,
+                ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
+            };
+            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(2) };
+            string current = loginUrl;
+            for (int i = 0; i < 8 && !string.IsNullOrEmpty(current); i++)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, current);
+                request.Headers.TryAddWithoutValidation("User-Agent", HTTPUtil.UserAgent);
+                request.Headers.TryAddWithoutValidation("Referer", "https://passport.bilibili.com/");
+                request.Headers.TryAddWithoutValidation("Accept", "*/*");
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                if (response.Headers.TryGetValues("Set-Cookie", out var setCookies))
+                {
+                    foreach (var setCookie in setCookies)
+                    {
+                        string pair = setCookie.Split(';', 2)[0];
+                        int eq = pair.IndexOf('=');
+                        if (eq <= 0) continue;
+                        string name = pair[..eq].Trim();
+                        if (wanted.Contains(name)) cookies[name] = pair[(eq + 1)..].Trim();
+                    }
+                }
+                if ((int)response.StatusCode is >= 300 and < 400 && response.Headers.Location != null)
+                {
+                    current = response.Headers.Location.IsAbsoluteUri
+                        ? response.Headers.Location.AbsoluteUri
+                        : new Uri(new Uri(current), response.Headers.Location).AbsoluteUri;
+                    continue;
+                }
+                break;
+            }
+        }
+
+        return string.Join(";", wanted.Where(cookies.ContainsKey).Select(name => $"{name}={cookies[name]}"));
+    }
+
+    private static string GetCookieValue(string cookies, string name)
+    {
+        foreach (var item in cookies.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = item.IndexOf('=');
+            if (eq > 0 && item[..eq].Trim().Equals(name)) return item[(eq + 1)..].Trim();
+        }
+        return "";
     }
 
     public static async Task LoginTV()
